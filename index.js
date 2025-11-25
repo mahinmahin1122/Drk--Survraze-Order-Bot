@@ -14,7 +14,8 @@ const PREFIX = './';
 
 client.once('ready', () => {
     console.log(`✅ Bot logged in as ${client.user.tag}!`);
-    console.log('📝 Use: ./approved username');
+    console.log('🚀 Bot is now running on Railway.app!');
+    console.log('📝 Usage: ./approved username');
 });
 
 client.on('messageCreate', async message => {
@@ -28,24 +29,23 @@ client.on('messageCreate', async message => {
         const username = args[0];
 
         if (!username) {
-            return message.reply('❌ Please provide a username: `./approved username`');
+            return message.reply('❌ Usage: `./approved username`');
         }
 
         try {
             console.log(`🔍 Searching for user: ${username}`);
             
-            // Find user by username (case insensitive)
+            // Find user by username
             const user = client.users.cache.find(u => 
-                u.username.toLowerCase() === username.toLowerCase() || 
-                u.tag.toLowerCase() === username.toLowerCase()
+                u.username.toLowerCase() === username.toLowerCase()
             );
             
             if (!user) {
                 console.log(`❌ User not found: ${username}`);
-                return message.reply(`❌ User "${username}" খুঁজে পাওয়া যায়নি!`);
+                return message.reply(`❌ User "${username}" not found!`);
             }
 
-            console.log(`✅ User found: ${user.tag} (${user.id})`);
+            console.log(`✅ User found: ${user.tag}`);
 
             // Send DM
             try {
@@ -76,11 +76,11 @@ client.on('messageCreate', async message => {
                 });
                 
                 console.log(`📨 Message sent to: ${user.tag}`);
-                await message.reply(`✅ **${user.tag}** কে approval message পাঠানো হয়েছে!`);
+                await message.reply(`✅ Approval message sent to **${user.tag}**`);
                 
             } catch (dmError) {
                 console.log(`❌ DM failed for: ${user.tag}`);
-                await message.reply(`❌ **${user.tag}** কে DM পাঠানো যায়নি। তাদের DMs disabled থাকতে পারে।`);
+                await message.reply(`❌ Could not send DM to **${user.tag}**. DMs might be disabled.`);
             }
 
         } catch (error) {
@@ -90,12 +90,14 @@ client.on('messageCreate', async message => {
     }
 });
 
-// Login
-if (!TOKEN) {
-    console.error('❌ ERROR: Please set DISCORD_TOKEN in environment variables!');
-    process.exit(1);
-}
+// Error handling
+client.on('error', console.error);
 
+process.on('unhandledRejection', (error) => {
+    console.error('Unhandled promise rejection:', error);
+});
+
+// Login
 client.login(TOKEN).catch(error => {
     console.error('❌ Failed to login:', error);
     process.exit(1);
