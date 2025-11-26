@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 
 // ==================== CONFIGURATION ====================
 const CONFIG = {
@@ -77,30 +77,14 @@ async function processWebhookOrder(message) {
             if (orderId && discordUsername) {
                 pendingOrders.set(orderId, {
                     discordUsername: discordUsername,
-                    messageId: message.id,
+                    webhookMessageId: message.id, // ✅ Webhook message ID store
                     channelId: message.channel.id,
                     timestamp: new Date(),
                     originalEmbed: embed
                 });
                 
                 console.log(`📦 New order stored: ${orderId} for ${discordUsername}`);
-                
-                // ✅ FIXED: New order notification send করবে
-                try {
-                    const notificationMsg = await message.channel.send(`📥 New order received: \`${orderId}\` for ${discordUsername}`);
-                    
-                    // Notification message কেও 30 second পর delete করবে
-                    setTimeout(async () => {
-                        try {
-                            await notificationMsg.delete();
-                        } catch (deleteError) {
-                            console.log('Could not delete notification message');
-                        }
-                    }, 30000);
-                    
-                } catch (notifyError) {
-                    console.log('Could not send notification message');
-                }
+                console.log(`📝 Webhook Message ID: ${message.id}`);
             }
         }
     } catch (error) {
@@ -178,40 +162,27 @@ async function handleApprovalCommand(message) {
 
             await user.send({ embeds: [dmEmbed] });
             
-            // Update original webhook message first
+            // ✅ FIXED: শুধু WEBHOOK NOTIFICATION DELETE করবে (Bot এর message নয়)
             try {
                 const channel = await client.channels.fetch(orderInfo.channelId);
-                const originalMessage = await channel.messages.fetch(orderInfo.messageId);
+                const webhookMessage = await channel.messages.fetch(orderInfo.webhookMessageId);
                 
-                const approvedEmbed = EmbedBuilder.from(orderInfo.originalEmbed)
-                    .setColor(0x00FF00)
-                    .addFields(
-                        { name: '✅ Approved By', value: message.author.tag, inline: true },
-                        { name: '🕒 Approved At', value: new Date().toLocaleString(), inline: true },
-                        { name: '📧 DM Status', value: '✅ Sent to User', inline: true }
-                    );
-
-                await originalMessage.edit({ 
-                    embeds: [approvedEmbed],
-                    components: []
-                });
-
-                // ✅ FIXED: 10 SECOND পরে WEBHOOK NOTIFICATION DELETE করবে
+                // Webhook notification delete করবে
                 setTimeout(async () => {
                     try {
-                        await originalMessage.delete();
+                        await webhookMessage.delete();
                         console.log(`🗑️ Webhook notification deleted for order: ${orderId}`);
                     } catch (deleteError) {
                         console.log('❌ Could not delete webhook notification:', deleteError.message);
                     }
                 }, 10000);
 
-            } catch (editError) {
-                console.log('Original message edit failed, but order was approved');
+            } catch (webhookError) {
+                console.log('❌ Could not find webhook message to delete:', webhookError.message);
             }
 
             // Bot এর message টি থাকবে (delete হবে না)
-            const successMsg = await message.reply(`✅ Order \`${orderId}\` approved! DM sent to ${orderInfo.discordUsername}`);
+            await message.reply(`✅ Order \`${orderId}\` approved! DM sent to ${orderInfo.discordUsername}`);
             
             // Remove from pending orders
             pendingOrders.delete(orderId);
@@ -264,37 +235,23 @@ async function handleRejectionCommand(message) {
 
             await user.send({ embeds: [dmEmbed] });
             
-            // Update original webhook message first
+            // ✅ FIXED: শুধু WEBHOOK NOTIFICATION DELETE করবে (Bot এর message নয়)
             try {
                 const channel = await client.channels.fetch(orderInfo.channelId);
-                const originalMessage = await channel.messages.fetch(orderInfo.messageId);
+                const webhookMessage = await channel.messages.fetch(orderInfo.webhookMessageId);
                 
-                const rejectedEmbed = EmbedBuilder.from(orderInfo.originalEmbed)
-                    .setColor(0xFF0000)
-                    .addFields(
-                        { name: '❌ Rejected By', value: message.author.tag, inline: true },
-                        { name: '🕒 Rejected At', value: new Date().toLocaleString(), inline: true },
-                        { name: '📧 DM Status', value: '✅ Sent to User', inline: true },
-                        { name: '💬 Reason', value: 'Order rejected. User notified to create ticket.', inline: false }
-                    );
-
-                await originalMessage.edit({ 
-                    embeds: [rejectedEmbed],
-                    components: []
-                });
-
-                // ✅ FIXED: 10 SECOND পরে WEBHOOK NOTIFICATION DELETE করবে
+                // Webhook notification delete করবে
                 setTimeout(async () => {
                     try {
-                        await originalMessage.delete();
+                        await webhookMessage.delete();
                         console.log(`🗑️ Webhook notification deleted for order: ${orderId}`);
                     } catch (deleteError) {
                         console.log('❌ Could not delete webhook notification:', deleteError.message);
                     }
                 }, 10000);
 
-            } catch (editError) {
-                console.log('Original message edit failed, but order was rejected');
+            } catch (webhookError) {
+                console.log('❌ Could not find webhook message to delete:', webhookError.message);
             }
 
             // Bot এর message টি থাকবে (delete হবে না)
