@@ -86,21 +86,11 @@ async function processWebhookOrder(message) {
                 console.log(`📦 New order stored: ${orderId} for ${discordUsername}`);
                 console.log(`📝 Webhook Message ID: ${message.id}`);
                 
-                // ✅ FIXED: New order notification send করবে
+                // ✅ FIXED: New order notification send করবে (এবং DELETE হবে না)
                 try {
-                    const notificationMsg = await message.channel.send(`📥 New order received: \`${orderId}\` for ${discordUsername}`);
+                    await message.channel.send(`📥 New order received: \`${orderId}\` for ${discordUsername}`);
                     console.log(`📢 Notification sent for order: ${orderId}`);
-                    
-                    // Notification message কেও 30 second পর delete করবে
-                    setTimeout(async () => {
-                        try {
-                            await notificationMsg.delete();
-                            console.log(`🗑️ Notification deleted for order: ${orderId}`);
-                        } catch (deleteError) {
-                            console.log('Could not delete notification message');
-                        }
-                    }, 30000);
-                    
+                    // ✅ এই notification message টি থাকবে, delete হবে না
                 } catch (notifyError) {
                     console.log('Could not send notification message:', notifyError.message);
                 }
@@ -181,7 +171,7 @@ async function handleApprovalCommand(message) {
 
             await user.send({ embeds: [dmEmbed] });
             
-            // ✅ FIXED: শুধু WEBHOOK NOTIFICATION DELETE করবে (Bot এর message নয়)
+            // ✅ FIXED: শুধু WEBHOOK NOTIFICATION DELETE করবে
             try {
                 const channel = await client.channels.fetch(orderInfo.channelId);
                 const webhookMessage = await channel.messages.fetch(orderInfo.webhookMessageId);
@@ -254,7 +244,7 @@ async function handleRejectionCommand(message) {
 
             await user.send({ embeds: [dmEmbed] });
             
-            // ✅ FIXED: শুধু WEBHOOK NOTIFICATION DELETE করবে (Bot এর message নয়)
+            // ✅ FIXED: শুধু WEBHOOK NOTIFICATION DELETE করবে
             try {
                 const channel = await client.channels.fetch(orderInfo.channelId);
                 const webhookMessage = await channel.messages.fetch(orderInfo.webhookMessageId);
