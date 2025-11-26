@@ -1,19 +1,20 @@
-const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
 // ==================== CONFIGURATION ====================
-// Railway environment variables ব্যবহার করুন
 const CONFIG = {
     BOT_TOKEN: process.env.BOT_TOKEN || 'YOUR_BOT_TOKEN_HERE',
     PREFIX: './',
     GUILD_ID: process.env.GUILD_ID || 'YOUR_SERVER_ID',
-    ORDER_CHANNEL_ID: process.env.ORDER_CHANNEL_ID || 'ORDER_CHANNEL_ID'
+    ORDER_CHANNEL_ID: process.env.ORDER_CHANNEL_ID || 'ORDER_CHANNEL_ID',
+    DISCORD_INVITE_LINK: 'https://discord.gg/SjefnHedt' // আপনার Discord invite link
 };
 
 const MESSAGES = {
     APPROVAL_SUCCESS: '🎉 **YOUR ORDER APPROVED!**\nYour purchase has been approved successfully!',
+    REJECTION_MESSAGE: '❌ **YOUR ORDER REJECTED**\nIf you have any problem, please create a ticket on our Discord server.',
     ORDER_NOT_FOUND: '❌ Order ID not found in pending orders.',
-    NO_PERMISSION: '❌ You do not have permission to approve orders.',
-    INVALID_COMMAND: '❌ Usage: `./approved <order_id>`',
+    NO_PERMISSION: '❌ You do not have permission to manage orders.',
+    INVALID_COMMAND: '❌ Usage: `./approved <order_id>` or `./rejected <order_id>`',
     NO_PENDING_ORDERS: '📭 No pending orders found.'
 };
 
@@ -27,7 +28,7 @@ const client = new Client({
     ]
 });
 
-// Memory storage (Railway এ restart হলে reset হবে)
+// Memory storage
 const pendingOrders = new Map();
 
 // ==================== BOT EVENTS ====================
@@ -36,11 +37,9 @@ client.on('ready', () => {
     console.log(`📊 Bot is running on ${client.guilds.cache.size} servers`);
     console.log(`🚀 Drk Survraze Order Bot is ready!`);
     
-    // Activity set করুন
-    client.user.setActivity('./approved | Drk Survraze', { type: 'WATCHING' });
+    client.user.setActivity('./help | Drk Survraze', { type: 'WATCHING' });
 });
 
-// Webhook message process
 client.on('messageCreate', async (message) => {
     try {
         // Webhook messages process
@@ -52,6 +51,8 @@ client.on('messageCreate', async (message) => {
         // Commands process
         if (message.content.startsWith(`${CONFIG.PREFIX}approved`)) {
             await handleApprovalCommand(message);
+        } else if (message.content.startsWith(`${CONFIG.PREFIX}rejected`)) {
+            await handleRejectionCommand(message);
         } else if (message.content === `${CONFIG.PREFIX}orders`) {
             await handleOrdersCommand(message);
         } else if (message.content === `${CONFIG.PREFIX}ping`) {
@@ -74,18 +75,17 @@ async function processWebhookOrder(message) {
             const discordUsername = extractDiscordUsername(embed);
             
             if (orderId && discordUsername) {
-                // Order store করুন
                 pendingOrders.set(orderId, {
                     discordUsername: discordUsername,
                     messageId: message.id,
                     channelId: message.channel.id,
                     timestamp: new Date(),
-                    originalEmbed: embed
+                    originalEmbed: embed,
+                    commandMessageId: null // পরে store করবে
                 });
                 
                 console.log(`📦 New order stored: ${orderId} for ${discordUsername}`);
                 
-                // Admin কে notify করুন
                 try {
                     await message.channel.send(`📥 New order received: \`${orderId}\` for ${discordUsername}`);
                 } catch (notifyError) {
@@ -124,7 +124,6 @@ function extractDiscordUsername(embed) {
         }
     }
     
-    // Fallback: সব fields check করুন
     for (let field of embed.fields) {
         if (field.value && (field.value.includes('#') || field.value.toLowerCase().includes('discord'))) {
             return field.value.replace(/[`]/g, '').trim();
@@ -135,7 +134,6 @@ function extractDiscordUsername(embed) {
 }
 
 async function handleApprovalCommand(message) {
-    // Permission check
     if (!message.member.permissions.has('ADMINISTRATOR')) {
         return message.reply(MESSAGES.NO_PERMISSION);
     }
@@ -153,11 +151,14 @@ async function handleApprovalCommand(message) {
     }
 
     try {
-        // User খুঁজুন
+        // Store command message ID for later deletion
+        orderInfo.commandMessageId = message.id;
+        pendingOrders.set(orderId, orderInfo);
+
         const user = await findUserByUsername(orderInfo.discordUsername);
         
         if (user) {
-            // User কে DM পাঠান
+            // Send approval DM to user
             const dmEmbed = new EmbedBuilder()
                 .setTitle('🎉 ORDER APPROVED!')
                 .setDescription(MESSAGES.APPROVAL_SUCCESS)
@@ -171,7 +172,7 @@ async function handleApprovalCommand(message) {
 
             await user.send({ embeds: [dmEmbed] });
             
-            // Original message update করুন
+            // Update original webhook message
             try {
                 const channel = await client.channels.fetch(orderInfo.channelId);
                 const originalMessage = await channel.messages.fetch(orderInfo.messageId);
@@ -180,7 +181,8 @@ async function handleApprovalCommand(message) {
                     .setColor(0x00FF00)
                     .addFields(
                         { name: '✅ Approved By', value: message.author.tag, inline: true },
-                        { name: '🕒 Approved At', value: new Date().toLocaleString(), inline: true }
+                        { name: '🕒 Approved At', value: new Date().toLocaleString(), inline: true },
+                        { name: '📧 DM Status', value: '✅ Sent to User', inline: true }
                     );
 
                 await originalMessage.edit({ 
@@ -191,19 +193,159 @@ async function handleApprovalCommand(message) {
                 console.log('Original message edit failed, but order was approved');
             }
 
-            // Order remove করুন
+            // Send success message and schedule deletion
+            const successMsg = await message.reply(`✅ Order \`${orderId}\` approved! DM sent to ${orderInfo.discordUsername}`);
+            
+            // Remove from pending orders
             pendingOrders.delete(orderId);
-
-            await message.reply(`✅ Order \`${orderId}\` approved! DM sent to ${orderInfo.discordUsername}`);
             
             console.log(`✅ Order ${orderId} approved for ${orderInfo.discordUsername}`);
+            
+            // Schedule message deletion after 10 seconds
+            setTimeout(async () => {
+                try {
+                    await message.delete();
+                    await successMsg.delete();
+                } catch (deleteError) {
+                    console.log('Could not delete approval messages');
+                }
+            }, 10000);
+            
         } else {
-            await message.reply(`❌ User not found: ${orderInfo.discordUsername}`);
+            const errorMsg = await message.reply(`❌ User not found: ${orderInfo.discordUsername}`);
             pendingOrders.delete(orderId);
+            
+            // Schedule deletion
+            setTimeout(async () => {
+                try {
+                    await message.delete();
+                    await errorMsg.delete();
+                } catch (deleteError) {
+                    console.log('Could not delete error messages');
+                }
+            }, 10000);
         }
     } catch (error) {
         console.error('Approval error:', error);
-        await message.reply('❌ Error approving order.');
+        const errorMsg = await message.reply('❌ Error approving order.');
+        
+        setTimeout(async () => {
+            try {
+                await message.delete();
+                await errorMsg.delete();
+            } catch (deleteError) {
+                console.log('Could not delete error messages');
+            }
+        }, 10000);
+    }
+}
+
+async function handleRejectionCommand(message) {
+    if (!message.member.permissions.has('ADMINISTRATOR')) {
+        return message.reply(MESSAGES.NO_PERMISSION);
+    }
+
+    const args = message.content.split(' ');
+    if (args.length < 2) {
+        return message.reply(MESSAGES.INVALID_COMMAND);
+    }
+
+    const orderId = args[1];
+    const orderInfo = pendingOrders.get(orderId);
+
+    if (!orderInfo) {
+        return message.reply(MESSAGES.ORDER_NOT_FOUND);
+    }
+
+    try {
+        // Store command message ID for later deletion
+        orderInfo.commandMessageId = message.id;
+        pendingOrders.set(orderId, orderInfo);
+
+        const user = await findUserByUsername(orderInfo.discordUsername);
+        
+        if (user) {
+            // Send rejection DM to user with Discord link
+            const dmEmbed = new EmbedBuilder()
+                .setTitle('❌ ORDER REJECTED')
+                .setDescription(MESSAGES.REJECTION_MESSAGE)
+                .addFields(
+                    { name: '🆔 Order ID', value: `\`${orderId}\``, inline: true },
+                    { name: '⭐ Status', value: '❌ Rejected', inline: true },
+                    { name: '⏰ Rejected At', value: new Date().toLocaleString(), inline: true },
+                    { name: '📞 Need Help?', value: `[Create Ticket on Discord](${CONFIG.DISCORD_INVITE_LINK})`, inline: false }
+                )
+                .setColor(0xFF0000)
+                .setFooter({ text: 'Drk Survraze SMP - Contact support if you have questions' });
+
+            await user.send({ embeds: [dmEmbed] });
+            
+            // Update original webhook message
+            try {
+                const channel = await client.channels.fetch(orderInfo.channelId);
+                const originalMessage = await channel.messages.fetch(orderInfo.messageId);
+                
+                const rejectedEmbed = EmbedBuilder.from(orderInfo.originalEmbed)
+                    .setColor(0xFF0000)
+                    .addFields(
+                        { name: '❌ Rejected By', value: message.author.tag, inline: true },
+                        { name: '🕒 Rejected At', value: new Date().toLocaleString(), inline: true },
+                        { name: '📧 DM Status', value: '✅ Sent to User', inline: true },
+                        { name: '💬 Reason', value: 'Order rejected. User notified to create ticket.', inline: false }
+                    );
+
+                await originalMessage.edit({ 
+                    embeds: [rejectedEmbed],
+                    components: []
+                });
+            } catch (editError) {
+                console.log('Original message edit failed, but order was rejected');
+            }
+
+            // Send success message and schedule deletion
+            const successMsg = await message.reply(`❌ Order \`${orderId}\` rejected! DM sent to ${orderInfo.discordUsername}`);
+            
+            // Remove from pending orders
+            pendingOrders.delete(orderId);
+            
+            console.log(`❌ Order ${orderId} rejected for ${orderInfo.discordUsername}`);
+            
+            // Schedule message deletion after 10 seconds
+            setTimeout(async () => {
+                try {
+                    await message.delete();
+                    await successMsg.delete();
+                } catch (deleteError) {
+                    console.log('Could not delete rejection messages');
+                }
+            }, 10000);
+            
+        } else {
+            const errorMsg = await message.reply(`❌ User not found: ${orderInfo.discordUsername}`);
+            pendingOrders.delete(orderId);
+            
+            // Schedule deletion
+            setTimeout(async () => {
+                try {
+                    await message.delete();
+                    await errorMsg.delete();
+                } catch (deleteError) {
+                    console.log('Could not delete error messages');
+                }
+            }, 10000);
+        }
+    } catch (error) {
+        console.error('Rejection error:', error);
+        const errorMsg = await message.reply('❌ Error rejecting order.');
+        
+        setTimeout(async () => {
+            try {
+                await message.delete();
+                await errorMsg.delete();
+            } catch (deleteError) {
+                console.log('Could not delete error messages');
+            }
+        }, 10000);
     }
 }
 
@@ -257,24 +399,46 @@ async function handleOrdersCommand(message) {
         .setTitle('📦 Pending Orders')
         .setDescription(ordersList)
         .setColor(0xFFA500)
-        .setFooter({ text: `Total: ${pendingOrders.size} orders` });
+        .setFooter({ text: `Total: ${pendingOrders.size} orders - Use ./approved or ./rejected <order_id>` });
 
-    await message.reply({ embeds: [embed] });
+    const ordersMsg = await message.reply({ embeds: [embed] });
+    
+    // Schedule deletion after 30 seconds (orders list needs more time to read)
+    setTimeout(async () => {
+        try {
+            await message.delete();
+            await ordersMsg.delete();
+        } catch (deleteError) {
+            console.log('Could not delete orders messages');
+        }
+    }, 30000);
 }
 
 async function handleHelpCommand(message) {
     const helpEmbed = new EmbedBuilder()
         .setTitle('🤖 Drk Order Bot Help')
-        .setDescription('Available commands:')
+        .setDescription('Available commands for administrators:')
         .addFields(
             { name: './approved <order_id>', value: 'Approve an order and send DM to user', inline: false },
+            { name: './rejected <order_id>', value: 'Reject an order and send DM to user', inline: false },
             { name: './orders', value: 'List all pending orders', inline: false },
-            { name: './ping', value: 'Check bot latency', inline: false }
+            { name: './ping', value: 'Check bot latency', inline: false },
+            { name: '📝 Note', value: 'Command messages auto-delete after 10 seconds', inline: false }
         )
         .setColor(0x0099FF)
         .setFooter({ text: 'Drk Survraze SMP - Order Management System' });
 
-    await message.reply({ embeds: [helpEmbed] });
+    const helpMsg = await message.reply({ embeds: [helpEmbed] });
+    
+    // Schedule deletion after 30 seconds
+    setTimeout(async () => {
+        try {
+            await message.delete();
+            await helpMsg.delete();
+        } catch (deleteError) {
+            console.log('Could not delete help messages');
+        }
+    }, 30000);
 }
 
 // ==================== ERROR HANDLING ====================
